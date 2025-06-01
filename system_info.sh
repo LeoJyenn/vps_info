@@ -86,12 +86,20 @@ get_network_traffic() {
     # Convert to GB - carefully handle the calculation to avoid BC errors
     if [[ -n "$rx_bytes" && "$rx_bytes" != "0" ]]; then
         local rx_gb=$(echo "scale=2; $rx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "0.00")
+        # 确保有前导0
+        if [[ "$rx_gb" == "."* ]]; then
+            rx_gb="0$rx_gb"
+        fi
     else
         local rx_gb="0.00"
     fi
 
     if [[ -n "$tx_bytes" && "$tx_bytes" != "0" ]]; then
         local tx_gb=$(echo "scale=2; $tx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "0.00")
+        # 确保有前导0
+        if [[ "$tx_gb" == "."* ]]; then
+            tx_gb="0$tx_gb"
+        fi
     else
         local tx_gb="0.00"
     fi
@@ -224,11 +232,17 @@ if [ -f /proc/net/dev ]; then
     rx_gb=${rx_gb:-"0.00"}
     tx_gb=${tx_gb:-"0.00"}
 
-    # 如果值为0.00，尝试以MB为单位显示
-    if [[ "$rx_gb" == "0.00" ]]; then
+    # 如果值非常小（但不是0），尝试以MB为单位显示
+    if [[ "$rx_gb" == "0.00" || $(echo "$rx_gb < 0.01" | bc -l 2>/dev/null || echo "0") -eq 1 ]]; then
         rx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{received += $2} END {print received}')
         if [[ -n "$rx_bytes" && "$rx_bytes" != "0" ]]; then
             rx_mb=$(echo "scale=2; $rx_bytes/1024/1024" | bc 2>/dev/null || echo "0.00")
+            # 确保有前导0
+            if [[ "$rx_mb" == "."* ]]; then
+                rx_mb="0$rx_mb"
+            elif [[ -z "$rx_mb" ]]; then
+                rx_mb="0.00"
+            fi
             rx_display="${rx_mb} MB"
         else
             rx_display="0.00 GB"
@@ -237,10 +251,16 @@ if [ -f /proc/net/dev ]; then
         rx_display="${rx_gb} GB"
     fi
 
-    if [[ "$tx_gb" == "0.00" ]]; then
+    if [[ "$tx_gb" == "0.00" || $(echo "$tx_gb < 0.01" | bc -l 2>/dev/null || echo "0") -eq 1 ]]; then
         tx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{sent += $10} END {print sent}')
         if [[ -n "$tx_bytes" && "$tx_bytes" != "0" ]]; then
             tx_mb=$(echo "scale=2; $tx_bytes/1024/1024" | bc 2>/dev/null || echo "0.00")
+            # 确保有前导0
+            if [[ "$tx_mb" == "."* ]]; then
+                tx_mb="0$tx_mb"
+            elif [[ -z "$tx_mb" ]]; then
+                tx_mb="0.00"
+            fi
             tx_display="${tx_mb} MB"
         else
             tx_display="0.00 GB"
@@ -273,41 +293,72 @@ sys_time=$(date "+%Y-%m-%d %H:%M %p")
 
 # Get uptime with error handling and convert to Chinese
 if command -v uptime &>/dev/null; then
-    # Try different methods to get uptime in a format we can parse
-    if uptime -p &>/dev/null; then
-        # Use 'uptime -p' if available (modern systems)
-        uptime_str=$(uptime -p 2>/dev/null | sed 's/up //')
+    # 获取原始uptime输出
+    uptime_full=$(uptime)
 
-        # 更精确的中文转换
+    # 完全重写uptime解析
+    # 初始化变量
+    uptime_str=""
+    weeks=0
+    days=0
+    hours=0
+    minutes=0
+
+    # 提取周数
+    weeks_pattern='([0-9]+) week[s]*'
+    if [[ $uptime_full =~ $weeks_pattern ]]; then
+        weeks="${BASH_REMATCH[1]}"
+        [[ $weeks -gt 0 ]] && uptime_str="${uptime_str}${weeks}周"
+    fi
+
+    # 提取天数
+    days_pattern='([0-9]+) day[s]*'
+    if [[ $uptime_full =~ $days_pattern ]]; then
+        days="${BASH_REMATCH[1]}"
+        [[ $days -gt 0 ]] && uptime_str="${uptime_str}${days}天"
+    fi
+
+    # 通过uptime -p获取时分
+    if uptime -p &>/dev/null; then
+        time_info=$(uptime -p)
+
+        # 提取小时
+        hours_pattern='([0-9]+) hour[s]*'
+        if [[ $time_info =~ $hours_pattern ]]; then
+            hours="${BASH_REMATCH[1]}"
+            [[ $hours -gt 0 ]] && uptime_str="${uptime_str}${hours}小时"
+        fi
+
+        # 提取分钟
+        minutes_pattern='([0-9]+) minute[s]*'
+        if [[ $time_info =~ $minutes_pattern ]]; then
+            minutes="${BASH_REMATCH[1]}"
+            [[ $minutes -gt 0 ]] && uptime_str="${uptime_str}${minutes}分钟"
+        fi
+    else
+        # 如果uptime -p不支持，解析传统uptime输出的HH:MM格式
+        time_pattern='up.*([0-9]+):([0-9]+)'
+        if [[ $uptime_full =~ $time_pattern ]]; then
+            hours="${BASH_REMATCH[1]}"
+            minutes="${BASH_REMATCH[2]}"
+            [[ $hours -gt 0 ]] && uptime_str="${uptime_str}${hours}小时"
+            [[ $minutes -gt 0 ]] && uptime_str="${uptime_str}${minutes}分钟"
+        fi
+    fi
+
+    # 如果最终字符串仍为空，使用默认格式
+    if [[ -z "$uptime_str" ]]; then
+        uptime_str=$(echo "$uptime_full" | sed 's/.*up \([^,]*\),.*/\1/' | tr -d ',')
         uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) week/\1周/g' | sed 's/\([0-9]\+\) weeks/\1周/g')
         uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) day/\1天/g' | sed 's/\([0-9]\+\) days/\1天/g')
         uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) hour/\1小时/g' | sed 's/\([0-9]\+\) hours/\1小时/g')
         uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) minute/\1分钟/g' | sed 's/\([0-9]\+\) minutes/\1分钟/g')
         uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) second/\1秒/g' | sed 's/\([0-9]\+\) seconds/\1秒/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/, / /g')
-    else
-        # Fall back to parsing traditional uptime output
-        uptime_full=$(uptime)
-        # Extract days
-        days=$(echo "$uptime_full" | grep -o '[0-9]\+ day' | awk '{print $1}')
-        if [[ -z "$days" ]]; then
-            days=$(echo "$uptime_full" | grep -o '[0-9]\+ days' | awk '{print $1}')
-        fi
-        # Extract time
-        time_part=$(echo "$uptime_full" | grep -o '[0-9][0-9]:[0-9][0-9]')
-        hours=$(echo "$time_part" | cut -d':' -f1)
-        minutes=$(echo "$time_part" | cut -d':' -f2)
-
-        # Build uptime string in Chinese
-        uptime_str=""
-        [[ -n "$days" ]] && uptime_str="${days}天 "
-        [[ -n "$hours" && "$hours" != "00" ]] && uptime_str="${uptime_str}${hours}小时 "
-        [[ -n "$minutes" && "$minutes" != "00" ]] && uptime_str="${uptime_str}${minutes}分钟"
-        uptime_str=$(echo "$uptime_str" | sed 's/ $//') # 去除尾部空格
+        uptime_str=$(echo "$uptime_str" | sed 's/ //g') # 移除所有空格
     fi
 
-    # 确保没有空格后面跟单位
-    uptime_info=$(echo "$uptime_str" | sed 's/ \([周天小时分钟秒]\)/\1/g')
+    # 最终清理
+    uptime_info="$uptime_str"
 else
     uptime_info="未知"
 fi
