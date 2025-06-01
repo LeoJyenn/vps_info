@@ -85,13 +85,13 @@ get_network_traffic() {
 
     # Convert to GB - carefully handle the calculation to avoid BC errors
     if [[ -n "$rx_bytes" && "$rx_bytes" != "0" ]]; then
-        local rx_gb=$(echo "scale=2; $rx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "未知")
+        local rx_gb=$(echo "scale=2; $rx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "0.00")
     else
         local rx_gb="0.00"
     fi
 
     if [[ -n "$tx_bytes" && "$tx_bytes" != "0" ]]; then
-        local tx_gb=$(echo "scale=2; $tx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "未知")
+        local tx_gb=$(echo "scale=2; $tx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "0.00")
     else
         local tx_gb="0.00"
     fi
@@ -146,31 +146,6 @@ format_cong_algo() {
     "westwood") echo "WESTWOOD" ;;
     *) echo "$algo" ;;
     esac
-}
-
-# Function to convert English uptime to Chinese
-convert_uptime_to_chinese() {
-    local uptime_str=$1
-    uptime_str=$(echo "$uptime_str" |
-        sed 's/week/周/g' |
-        sed 's/weeks/周/g' |
-        sed 's/day/天/g' |
-        sed 's/days/天/g' |
-        sed 's/hour/小时/g' |
-        sed 's/hours/小时/g' |
-        sed 's/minute/分钟/g' |
-        sed 's/minutes/分钟/g' |
-        sed 's/,//g')
-    echo "$uptime_str"
-}
-
-# Print centered text with optional decoration
-print_centered() {
-    local text="$1"
-    local term_width=$(tput cols 2>/dev/null || echo 80)
-    local padding=$(((term_width - ${#text}) / 2))
-
-    printf "%${padding}s${WHITE}${BOLD}%s${NC}%${padding}s\n" "" "$text" ""
 }
 
 # Get system information with error handling
@@ -245,12 +220,37 @@ fi
 # Get network traffic with error handling
 if [ -f /proc/net/dev ]; then
     read rx_gb tx_gb <<<"$(get_network_traffic)"
-    # 确保值不为空
+    # 确保值不为空，改成两位小数
     rx_gb=${rx_gb:-"0.00"}
     tx_gb=${tx_gb:-"0.00"}
+
+    # 如果值为0.00，尝试以MB为单位显示
+    if [[ "$rx_gb" == "0.00" ]]; then
+        rx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{received += $2} END {print received}')
+        if [[ -n "$rx_bytes" && "$rx_bytes" != "0" ]]; then
+            rx_mb=$(echo "scale=2; $rx_bytes/1024/1024" | bc 2>/dev/null || echo "0.00")
+            rx_display="${rx_mb} MB"
+        else
+            rx_display="0.00 GB"
+        fi
+    else
+        rx_display="${rx_gb} GB"
+    fi
+
+    if [[ "$tx_gb" == "0.00" ]]; then
+        tx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{sent += $10} END {print sent}')
+        if [[ -n "$tx_bytes" && "$tx_bytes" != "0" ]]; then
+            tx_mb=$(echo "scale=2; $tx_bytes/1024/1024" | bc 2>/dev/null || echo "0.00")
+            tx_display="${tx_mb} MB"
+        else
+            tx_display="0.00 GB"
+        fi
+    else
+        tx_display="${tx_gb} GB"
+    fi
 else
-    rx_gb="未知"
-    tx_gb="未知"
+    rx_display="未知"
+    tx_display="未知"
 fi
 
 # Get network congestion algorithm with error handling
@@ -273,16 +273,48 @@ sys_time=$(date "+%Y-%m-%d %H:%M %p")
 
 # Get uptime with error handling and convert to Chinese
 if command -v uptime &>/dev/null; then
-    uptime_info=$(uptime -p 2>/dev/null | sed 's/up //' || uptime | sed 's/.*up \([^,]*\),.*/\1/')
-    uptime_info=$(convert_uptime_to_chinese "$uptime_info")
+    # Try different methods to get uptime in a format we can parse
+    if uptime -p &>/dev/null; then
+        # Use 'uptime -p' if available (modern systems)
+        uptime_str=$(uptime -p 2>/dev/null | sed 's/up //')
+
+        # 更精确的中文转换
+        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) week/\1周/g' | sed 's/\([0-9]\+\) weeks/\1周/g')
+        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) day/\1天/g' | sed 's/\([0-9]\+\) days/\1天/g')
+        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) hour/\1小时/g' | sed 's/\([0-9]\+\) hours/\1小时/g')
+        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) minute/\1分钟/g' | sed 's/\([0-9]\+\) minutes/\1分钟/g')
+        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) second/\1秒/g' | sed 's/\([0-9]\+\) seconds/\1秒/g')
+        uptime_str=$(echo "$uptime_str" | sed 's/, / /g')
+    else
+        # Fall back to parsing traditional uptime output
+        uptime_full=$(uptime)
+        # Extract days
+        days=$(echo "$uptime_full" | grep -o '[0-9]\+ day' | awk '{print $1}')
+        if [[ -z "$days" ]]; then
+            days=$(echo "$uptime_full" | grep -o '[0-9]\+ days' | awk '{print $1}')
+        fi
+        # Extract time
+        time_part=$(echo "$uptime_full" | grep -o '[0-9][0-9]:[0-9][0-9]')
+        hours=$(echo "$time_part" | cut -d':' -f1)
+        minutes=$(echo "$time_part" | cut -d':' -f2)
+
+        # Build uptime string in Chinese
+        uptime_str=""
+        [[ -n "$days" ]] && uptime_str="${days}天 "
+        [[ -n "$hours" && "$hours" != "00" ]] && uptime_str="${uptime_str}${hours}小时 "
+        [[ -n "$minutes" && "$minutes" != "00" ]] && uptime_str="${uptime_str}${minutes}分钟"
+        uptime_str=$(echo "$uptime_str" | sed 's/ $//') # 去除尾部空格
+    fi
+
+    # 确保没有空格后面跟单位
+    uptime_info=$(echo "$uptime_str" | sed 's/ \([周天小时分钟秒]\)/\1/g')
 else
     uptime_info="未知"
 fi
 
 # Print header with decoration
-echo -e "\n"
-print_centered "✦ 系统信息详情 ✦"
-echo -e "\n$DIVIDER"
+echo -e "\n${WHITE}${BOLD}✦ 系统信息详情 ✦${NC}"
+echo -e "$DIVIDER"
 
 # Column layout with improved formatting
 echo -e "► 主机名: ${PURPLE}$hostname${NC}"
@@ -300,8 +332,8 @@ echo -e "► 物理内存: ${PURPLE}${used_mem}/${total_mem} MB (${mem_percent})
 echo -e "► 虚拟内存: ${PURPLE}${used_swap}/${total_swap}MB (${swap_percent})${NC}"
 echo -e "► 硬盘占用: ${PURPLE}${disk_used}/${disk_total} (${disk_percent})${NC}"
 echo -e "$DIVIDER"
-echo -e "► 总接收: ${PURPLE}${rx_gb} GB${NC}"
-echo -e "► 总发送: ${PURPLE}${tx_gb} GB${NC}"
+echo -e "► 总接收: ${PURPLE}${rx_display}${NC}"
+echo -e "► 总发送: ${PURPLE}${tx_display}${NC}"
 echo -e "$DIVIDER"
 echo -e "► 网络拥塞算法: ${PURPLE}$tcp_cong${NC}"
 echo -e "$DIVIDER"
