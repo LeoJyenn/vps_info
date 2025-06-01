@@ -9,11 +9,57 @@ if [[ "$(uname)" != "Linux" ]]; then
     exit 1
 fi
 
-# Check for required commands
+# Function to detect package manager and install packages
+install_package() {
+    local package=$1
+    echo "尝试安装必要的依赖: $package"
+
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y $package
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y $package
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y $package
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm $package
+    elif command -v apk &>/dev/null; then
+        sudo apk add $package
+    else
+        echo "无法自动安装 $package。请手动安装后再运行脚本。"
+        echo "常见安装命令:"
+        echo "  Debian/Ubuntu: sudo apt-get install $package"
+        echo "  CentOS/RHEL:   sudo yum install $package"
+        echo "  Fedora:        sudo dnf install $package"
+        echo "  Arch Linux:    sudo pacman -S $package"
+        echo "  Alpine Linux:  sudo apk add $package"
+        return 1
+    fi
+    return 0
+}
+
+# Check for required commands and try to install if missing
 for cmd in bc curl free df grep awk; do
     if ! command -v $cmd &>/dev/null; then
-        echo "Error: Required command '$cmd' not found. Please install it."
-        exit 1
+        echo "检测到缺少必要组件: $cmd"
+        if [ "$cmd" = "bc" ]; then
+            package="bc"
+        elif [ "$cmd" = "curl" ]; then
+            package="curl"
+        elif [ "$cmd" = "free" ]; then
+            package="procps"
+        elif [ "$cmd" = "df" ]; then
+            package="coreutils"
+        elif [ "$cmd" = "grep" ]; then
+            package="grep"
+        elif [ "$cmd" = "awk" ]; then
+            package="gawk"
+        fi
+
+        if install_package $package; then
+            echo "$cmd 已成功安装"
+        else
+            exit 1
+        fi
     fi
 done
 
