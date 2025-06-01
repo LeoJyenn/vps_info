@@ -208,9 +208,27 @@ if [ -f /proc/cpuinfo ]; then
     elif grep -q "Hardware" /proc/cpuinfo; then
         # 适用于ARM架构
         cpu_model=$(grep "Hardware" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
-    elif grep -q "cpu" /proc/cpuinfo && [[ "$cpu_arch" == "s390x" ]]; then
-        # 适用于s390x架构
-        cpu_model=$(grep -E "processor|machine" /proc/cpuinfo | head -2 | paste -sd ' ' | sed 's/.*://' | xargs || echo "未知")
+    elif grep -q "machine" /proc/cpuinfo && [[ "$cpu_arch" == "s390x" ]]; then
+        # 适用于s390x架构 - 优化显示
+        machine_id=$(grep "machine" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs | cut -d' ' -f3 || echo "")
+        # 映射常见IBM大型机型号
+        case "${machine_id}" in
+        "8561") cpu_model="IBM z15" ;;
+        "3906") cpu_model="IBM z14" ;;
+        "2964") cpu_model="IBM z13" ;;
+        "2827") cpu_model="IBM zEC12" ;;
+        "2817") cpu_model="IBM z196" ;;
+        "2097") cpu_model="IBM z10" ;;
+        "2094") cpu_model="IBM System z9" ;;
+        *)
+            # 如果无法识别，尝试获取更简洁的表示
+            if command -v lscpu &>/dev/null; then
+                cpu_model=$(lscpu | grep -E "Model:|Machine" | head -1 | cut -d':' -f2 | xargs || echo "IBM ${machine_id}")
+            else
+                cpu_model="IBM ${machine_id}"
+            fi
+            ;;
+        esac
     elif grep -q "cpu" /proc/cpuinfo; then
         # 其他cpuinfo格式
         cpu_model=$(grep "cpu" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs || echo "未知")
