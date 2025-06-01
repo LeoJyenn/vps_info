@@ -158,7 +158,35 @@ format_cong_algo() {
 
 # Get system information with error handling
 hostname=$(hostname)
-provider=$(if [ -f /sys/devices/virtual/dmi/id/product_name ]; then cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo "未知"; else echo "未知"; fi)
+# 改进运营商检测方法，支持更多架构
+if [ -f /sys/devices/virtual/dmi/id/product_name ]; then
+    provider=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo "未知")
+elif [ -f /sys/firmware/devicetree/base/model ]; then
+    # 适用于ARM和某些嵌入式设备
+    provider=$(cat /sys/firmware/devicetree/base/model 2>/dev/null || echo "未知")
+elif [ -f /proc/device-tree/model ]; then
+    # 另一种ARM设备路径
+    provider=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || echo "未知")
+elif [ -f /proc/cpuinfo ] && grep -q "vendor_id" /proc/cpuinfo; then
+    # 尝试从cpuinfo获取厂商
+    provider=$(grep "vendor_id" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs || echo "未知")
+elif [ -f /proc/cpuinfo ] && grep -q "machine" /proc/cpuinfo; then
+    # 适用于s390x架构
+    provider=$(grep "machine" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs || echo "未知")
+elif command -v lscpu &>/dev/null; then
+    # 使用lscpu工具
+    provider=$(lscpu | grep "Vendor ID" | cut -d':' -f2 | xargs || echo "未知")
+elif command -v dmidecode &>/dev/null; then
+    # 尝试使用dmidecode（需要root权限）
+    provider=$(sudo dmidecode -s system-manufacturer 2>/dev/null || echo "未知")
+else
+    provider="未知"
+fi
+
+# 如果值为空，确保显示"未知"
+if [[ -z "$provider" || "$provider" == "" ]]; then
+    provider="未知"
+fi
 
 # Try multiple methods to get OS version
 if command -v lsb_release &>/dev/null; then
@@ -171,7 +199,36 @@ fi
 
 kernel_version=$(uname -r)
 cpu_arch=$(uname -m)
-cpu_model=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
+
+# 根据不同架构获取CPU型号
+if [ -f /proc/cpuinfo ]; then
+    if grep -q "model name" /proc/cpuinfo; then
+        # 常见x86架构
+        cpu_model=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
+    elif grep -q "Hardware" /proc/cpuinfo; then
+        # 适用于ARM架构
+        cpu_model=$(grep "Hardware" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
+    elif grep -q "cpu" /proc/cpuinfo && [[ "$cpu_arch" == "s390x" ]]; then
+        # 适用于s390x架构
+        cpu_model=$(grep -E "processor|machine" /proc/cpuinfo | head -2 | paste -sd ' ' | sed 's/.*://' | xargs || echo "未知")
+    elif grep -q "cpu" /proc/cpuinfo; then
+        # 其他cpuinfo格式
+        cpu_model=$(grep "cpu" /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs || echo "未知")
+    else
+        cpu_model="未知"
+    fi
+elif command -v lscpu &>/dev/null; then
+    # 尝试使用lscpu获取CPU信息
+    cpu_model=$(lscpu | grep "Model name" | cut -d':' -f2 | xargs || echo "未知")
+else
+    cpu_model="未知"
+fi
+
+# 如果值为空，确保显示"未知"
+if [[ -z "$cpu_model" || "$cpu_model" == "" ]]; then
+    cpu_model="未知"
+fi
+
 cpu_cores=$(grep -c "processor" /proc/cpuinfo 2>/dev/null || echo "未知")
 
 # Get CPU usage with multiple methods for better reliability
