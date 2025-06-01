@@ -176,6 +176,11 @@ cpu_cores=$(grep -c "processor" /proc/cpuinfo 2>/dev/null || echo "未知")
 
 # Get CPU usage with improved error handling
 cpu_usage_raw=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2}' || echo "0")
+# 确保获取到正确的CPU使用率
+if [[ "$cpu_usage_raw" == *"us"* || "$cpu_usage_raw" == *"%" ]]; then
+    # 提取纯数字
+    cpu_usage_raw=$(echo "$cpu_usage_raw" | sed 's/[^0-9.]//g')
+fi
 cpu_usage="${cpu_usage_raw}%"
 
 # Get memory information with error handling
@@ -346,16 +351,26 @@ if command -v uptime &>/dev/null; then
         fi
     fi
 
-    # 如果最终字符串仍为空，使用默认格式
+    # 如果最终字符串仍为空，使用备用方法
     if [[ -z "$uptime_str" ]]; then
-        uptime_str=$(echo "$uptime_full" | sed 's/.*up \([^,]*\),.*/\1/' | tr -d ',')
-        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) week/\1周/g' | sed 's/\([0-9]\+\) weeks/\1周/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) day/\1天/g' | sed 's/\([0-9]\+\) days/\1天/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) hour/\1小时/g' | sed 's/\([0-9]\+\) hours/\1小时/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) minute/\1分钟/g' | sed 's/\([0-9]\+\) minutes/\1分钟/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/\([0-9]\+\) second/\1秒/g' | sed 's/\([0-9]\+\) seconds/\1秒/g')
-        uptime_str=$(echo "$uptime_str" | sed 's/ //g') # 移除所有空格
+        # 尝试直接解析
+        uptime_raw=$(uptime -p 2>/dev/null | sed 's/up //' || uptime | sed 's/.*up \([^,]*\),.*/\1/')
+        # 先做安全替换
+        uptime_raw=$(echo "$uptime_raw" | tr -d ',')
+        # 使用临时变量执行替换，避免多次替换
+        uptime_tmp=$(echo "$uptime_raw" | sed -E 's/([0-9]+) weeks?/\1周/g')
+        uptime_tmp=$(echo "$uptime_tmp" | sed -E 's/([0-9]+) days?/\1天/g')
+        uptime_tmp=$(echo "$uptime_tmp" | sed -E 's/([0-9]+) hours?/\1小时/g')
+        uptime_tmp=$(echo "$uptime_tmp" | sed -E 's/([0-9]+) minutes?/\1分钟/g')
+        uptime_tmp=$(echo "$uptime_tmp" | sed -E 's/([0-9]+) seconds?/\1秒/g')
+        # 移除所有可能导致问题的空格
+        uptime_str=$(echo "$uptime_tmp" | tr -d ' ')
     fi
+
+    # 防止任何可能导致s后缀的问题
+    uptime_str=$(echo "$uptime_str" | sed -E 's/小时s?/小时/g')
+    uptime_str=$(echo "$uptime_str" | sed -E 's/分钟s?/分钟/g')
+    uptime_str=$(echo "$uptime_str" | sed -E 's/秒s?/秒/g')
 
     # 最终清理
     uptime_info="$uptime_str"
