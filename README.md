@@ -21,13 +21,13 @@
 只需要一条命令即可在线运行本脚本，无需下载，无需安装：
 
 ```bash
-curl -s https://raw.githubusercontent.com/LeoJyenn/vps-info/main/system_info.sh | bash
+curl -s https://raw.githubusercontent.com/LeoJyenn/vps_info/main/system_info.sh | bash
 ```
 
 或者使用wget:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/LeoJyenn/vps-info/main/system_info.sh | bash
+wget -qO- https://raw.githubusercontent.com/LeoJyenn/vps_info/main/system_info.sh | bash
 ```
 
 这两个命令都会直接从网络获取脚本内容并通过bash执行，完全即用即走，不会在本地保存文件。
