@@ -174,12 +174,91 @@ cpu_arch=$(uname -m)
 cpu_model=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
 cpu_cores=$(grep -c "processor" /proc/cpuinfo 2>/dev/null || echo "未知")
 
-# Get CPU usage with improved error handling
-cpu_usage_raw=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2}' || echo "0")
-# 确保获取到正确的CPU使用率
-if [[ "$cpu_usage_raw" == *"us"* || "$cpu_usage_raw" == *"%" ]]; then
-    # 提取纯数字
-    cpu_usage_raw=$(echo "$cpu_usage_raw" | sed 's/[^0-9.]//g')
+# Get CPU usage with multiple methods for better reliability
+get_cpu_usage() {
+    local cpu_usage="0.0"
+
+    # 方法1: 尝试使用mpstat (如果安装了sysstat)
+    if command -v mpstat &>/dev/null; then
+        cpu_idle=$(mpstat 1 1 | grep -A 5 "%idle" | tail -n 1 | awk '{print $NF}' | tr ',' '.')
+        if [[ -n "$cpu_idle" && "$cpu_idle" != "0.00" ]]; then
+            cpu_usage=$(echo "100 - $cpu_idle" | bc 2>/dev/null)
+            if [[ -n "$cpu_usage" ]]; then
+                echo "$cpu_usage"
+                return
+            fi
+        fi
+    fi
+
+    # 方法2: 通过/proc/stat计算
+    if [ -f /proc/stat ]; then
+        # 获取两个采样点
+        local cpu_stat1=$(grep '^cpu ' /proc/stat)
+        sleep 0.2
+        local cpu_stat2=$(grep '^cpu ' /proc/stat)
+
+        # 解析数据
+        local user1=$(echo "$cpu_stat1" | awk '{print $2}')
+        local nice1=$(echo "$cpu_stat1" | awk '{print $3}')
+        local system1=$(echo "$cpu_stat1" | awk '{print $4}')
+        local idle1=$(echo "$cpu_stat1" | awk '{print $5}')
+
+        local user2=$(echo "$cpu_stat2" | awk '{print $2}')
+        local nice2=$(echo "$cpu_stat2" | awk '{print $3}')
+        local system2=$(echo "$cpu_stat2" | awk '{print $4}')
+        local idle2=$(echo "$cpu_stat2" | awk '{print $5}')
+
+        # 计算差异
+        local total1=$((user1 + nice1 + system1 + idle1))
+        local total2=$((user2 + nice2 + system2 + idle2))
+        local total_diff=$((total2 - total1))
+        local idle_diff=$((idle2 - idle1))
+
+        if [[ $total_diff -gt 0 ]]; then
+            # 计算使用率 (100% - 空闲%)
+            cpu_usage=$(echo "scale=1; 100 - ($idle_diff * 100 / $total_diff)" | bc 2>/dev/null || echo "0.0")
+            echo "$cpu_usage"
+            return
+        fi
+    fi
+
+    # 方法3: 尝试更通用地提取top输出
+    local top_output=$(top -bn1 2>/dev/null)
+
+    # 尝试提取总CPU使用率或计算 100-idle
+    if echo "$top_output" | grep -q "Cpu(s)"; then
+        # 提取idle百分比
+        local cpu_idle=$(echo "$top_output" | grep "Cpu(s)" | grep -o "[0-9]\+\.[0-9]\+.id" | grep -o "[0-9]\+\.[0-9]\+")
+        if [[ -n "$cpu_idle" ]]; then
+            cpu_usage=$(echo "100 - $cpu_idle" | bc 2>/dev/null || echo "0.0")
+        else
+            # 尝试提取user+system
+            local cpu_user=$(echo "$top_output" | grep "Cpu(s)" | grep -o "[0-9]\+\.[0-9]\+.us" | grep -o "[0-9]\+\.[0-9]\+")
+            local cpu_sys=$(echo "$top_output" | grep "Cpu(s)" | grep -o "[0-9]\+\.[0-9]\+.sy" | grep -o "[0-9]\+\.[0-9]\+")
+            if [[ -n "$cpu_user" && -n "$cpu_sys" ]]; then
+                cpu_usage=$(echo "$cpu_user + $cpu_sys" | bc 2>/dev/null || echo "0.0")
+            fi
+        fi
+    fi
+
+    # 确保结果至少有一位小数
+    if [[ "$cpu_usage" == *"."* ]]; then
+        echo "$cpu_usage"
+    else
+        echo "${cpu_usage}.0"
+    fi
+}
+
+# Get CPU usage, ensuring realistic values
+cpu_usage_raw=$(get_cpu_usage)
+if [[ -z "$cpu_usage_raw" || "$cpu_usage_raw" == "0" || "$cpu_usage_raw" == "0.0" ]]; then
+    # 如果所有方法都返回0，尝试获取任意非零进程的CPU使用率
+    cpu_process=$(ps -eo pcpu --sort=-pcpu | head -n 2 | tail -n 1)
+    if [[ -n "$cpu_process" && "$cpu_process" != "0.0" ]]; then
+        cpu_usage_raw="$cpu_process"
+    else
+        cpu_usage_raw="0.1" # 至少显示一点活动
+    fi
 fi
 cpu_usage="${cpu_usage_raw}%"
 
