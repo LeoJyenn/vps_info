@@ -5,7 +5,7 @@
 
 # Check if running on Linux
 if [[ "$(uname)" != "Linux" ]]; then
-    echo "This script only works on Linux systems."
+    echo "本脚本仅适用于Linux系统。"
     exit 1
 fi
 
@@ -70,9 +70,10 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
-DIVIDER="${PURPLE}-----------------------------${NC}"
+DIVIDER="${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 clear # Clear the screen for better visibility
 
@@ -82,9 +83,18 @@ get_network_traffic() {
     local rx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{received += $2} END {print received}')
     local tx_bytes=$(cat /proc/net/dev | grep -v lo | awk '{sent += $10} END {print sent}')
 
-    # Convert to GB
-    local rx_gb=$(echo "scale=2; $rx_bytes/1024/1024/1024" | bc)
-    local tx_gb=$(echo "scale=2; $tx_bytes/1024/1024/1024" | bc)
+    # Convert to GB - carefully handle the calculation to avoid BC errors
+    if [[ -n "$rx_bytes" && "$rx_bytes" != "0" ]]; then
+        local rx_gb=$(echo "scale=2; $rx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "未知")
+    else
+        local rx_gb="0.00"
+    fi
+
+    if [[ -n "$tx_bytes" && "$tx_bytes" != "0" ]]; then
+        local tx_gb=$(echo "scale=2; $tx_bytes/1024/1024/1024" | bc 2>/dev/null || echo "未知")
+    else
+        local tx_gb="0.00"
+    fi
 
     echo "$rx_gb $tx_gb"
 }
@@ -93,7 +103,7 @@ get_network_traffic() {
 get_geo_location() {
     local ip=$1
     if [[ -z "$ip" || "$ip" == "Unknown" ]]; then
-        echo "Unknown"
+        echo "未知"
         return
     fi
 
@@ -102,12 +112,26 @@ get_geo_location() {
         local country=$(echo "$geo" | grep '"country"' | cut -d'"' -f4)
         local city=$(echo "$geo" | grep '"city"' | cut -d'"' -f4)
         if [[ -n "$country" && -n "$city" ]]; then
+            # 转换国家代码为中文名称
+            case "$country" in
+            "US") country="美国" ;;
+            "CN") country="中国" ;;
+            "JP") country="日本" ;;
+            "KR") country="韩国" ;;
+            "SG") country="新加坡" ;;
+            "RU") country="俄罗斯" ;;
+            "DE") country="德国" ;;
+            "GB") country="英国" ;;
+            "CA") country="加拿大" ;;
+            "AU") country="澳大利亚" ;;
+            "FR") country="法国" ;;
+            esac
             echo "$country $city"
         else
-            echo "Unknown"
+            echo "未知"
         fi
     else
-        echo "Unknown"
+        echo "未知"
     fi
 }
 
@@ -115,27 +139,43 @@ get_geo_location() {
 format_cong_algo() {
     local algo=$1
     case "$algo" in
-    "bbr") echo "bbr" ;;
-    "cubic") echo "cubic" ;;
-    "reno") echo "reno" ;;
-    "vegas") echo "vegas" ;;
-    "westwood") echo "westwood" ;;
+    "bbr") echo "BBR" ;;
+    "cubic") echo "CUBIC" ;;
+    "reno") echo "RENO" ;;
+    "vegas") echo "VEGAS" ;;
+    "westwood") echo "WESTWOOD" ;;
     *) echo "$algo" ;;
     esac
 }
 
-# Print centered text
+# Function to convert English uptime to Chinese
+convert_uptime_to_chinese() {
+    local uptime_str=$1
+    uptime_str=$(echo "$uptime_str" |
+        sed 's/week/周/g' |
+        sed 's/weeks/周/g' |
+        sed 's/day/天/g' |
+        sed 's/days/天/g' |
+        sed 's/hour/小时/g' |
+        sed 's/hours/小时/g' |
+        sed 's/minute/分钟/g' |
+        sed 's/minutes/分钟/g' |
+        sed 's/,//g')
+    echo "$uptime_str"
+}
+
+# Print centered text with optional decoration
 print_centered() {
     local text="$1"
     local term_width=$(tput cols 2>/dev/null || echo 80)
     local padding=$(((term_width - ${#text}) / 2))
 
-    printf "%${padding}s%s%${padding}s\n" "" "$text" ""
+    printf "%${padding}s${WHITE}${BOLD}%s${NC}%${padding}s\n" "" "$text" ""
 }
 
 # Get system information with error handling
 hostname=$(hostname)
-provider=$(if [ -f /sys/devices/virtual/dmi/id/product_name ]; then cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo "Unknown"; else echo "Unknown"; fi)
+provider=$(if [ -f /sys/devices/virtual/dmi/id/product_name ]; then cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo "未知"; else echo "未知"; fi)
 
 # Try multiple methods to get OS version
 if command -v lsb_release &>/dev/null; then
@@ -143,13 +183,13 @@ if command -v lsb_release &>/dev/null; then
 elif [ -f /etc/os-release ]; then
     os_version=$(cat /etc/os-release | grep "PRETTY_NAME" | cut -d'"' -f2)
 else
-    os_version="Unknown"
+    os_version="未知"
 fi
 
 kernel_version=$(uname -r)
 cpu_arch=$(uname -m)
-cpu_model=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "Unknown")
-cpu_cores=$(grep -c "processor" /proc/cpuinfo 2>/dev/null || echo "Unknown")
+cpu_model=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d':' -f2 | xargs || echo "未知")
+cpu_cores=$(grep -c "processor" /proc/cpuinfo 2>/dev/null || echo "未知")
 
 # Get CPU usage with improved error handling
 cpu_usage_raw=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2}' || echo "0")
@@ -160,20 +200,34 @@ if command -v free &>/dev/null; then
     mem_info=$(free -m | grep Mem)
     total_mem=$(echo $mem_info | awk '{print $2}')
     used_mem=$(echo $mem_info | awk '{print $3}')
-    mem_percent=$(echo "scale=2; ($used_mem/$total_mem)*100" | bc 2>/dev/null || echo "0")"%"
+    if [[ -n "$used_mem" && -n "$total_mem" && "$total_mem" != "0" ]]; then
+        mem_percent=$(echo "scale=2; ($used_mem/$total_mem)*100" | bc 2>/dev/null || echo "0")
+        mem_percent="${mem_percent}%"
+    else
+        mem_percent="未知"
+    fi
 
     # Get swap information
     swap_info=$(free -m | grep Swap)
     total_swap=$(echo $swap_info | awk '{print $2}')
     used_swap=$(echo $swap_info | awk '{print $3}')
-    swap_percent=$([ "$total_swap" -eq 0 ] && echo "0%" || echo "scale=2; ($used_swap/$total_swap)*100" | bc 2>/dev/null || echo "0")"%"
+    if [[ -n "$used_swap" && -n "$total_swap" ]]; then
+        if [[ "$total_swap" -eq 0 ]]; then
+            swap_percent="0%"
+        else
+            swap_percent=$(echo "scale=2; ($used_swap/$total_swap)*100" | bc 2>/dev/null || echo "0")
+            swap_percent="${swap_percent}%"
+        fi
+    else
+        swap_percent="未知"
+    fi
 else
-    total_mem="Unknown"
-    used_mem="Unknown"
-    mem_percent="Unknown"
-    total_swap="Unknown"
-    used_swap="Unknown"
-    swap_percent="Unknown"
+    total_mem="未知"
+    used_mem="未知"
+    mem_percent="未知"
+    total_swap="未知"
+    used_swap="未知"
+    swap_percent="未知"
 fi
 
 # Get disk information with error handling
@@ -183,30 +237,33 @@ if command -v df &>/dev/null; then
     disk_total=$(echo $disk_info | awk '{print $2}')
     disk_percent=$(echo $disk_info | awk '{print $5}')
 else
-    disk_used="Unknown"
-    disk_total="Unknown"
-    disk_percent="Unknown"
+    disk_used="未知"
+    disk_total="未知"
+    disk_percent="未知"
 fi
 
 # Get network traffic with error handling
 if [ -f /proc/net/dev ]; then
     read rx_gb tx_gb <<<"$(get_network_traffic)"
+    # 确保值不为空
+    rx_gb=${rx_gb:-"0.00"}
+    tx_gb=${tx_gb:-"0.00"}
 else
-    rx_gb="Unknown"
-    tx_gb="Unknown"
+    rx_gb="未知"
+    tx_gb="未知"
 fi
 
 # Get network congestion algorithm with error handling
 if command -v sysctl &>/dev/null; then
-    tcp_cong_raw=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo "Unknown")
+    tcp_cong_raw=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}' || echo "未知")
     tcp_cong=$(format_cong_algo "$tcp_cong_raw")
 else
-    tcp_cong="Unknown"
+    tcp_cong="未知"
 fi
 
 # Get public IP addresses with timeout to avoid hanging
-ipv4_addr=$(curl -s --max-time 3 https://ipv4.icanhazip.com 2>/dev/null || echo "Unknown")
-ipv6_addr=$(curl -s --max-time 3 https://ipv6.icanhazip.com 2>/dev/null || echo "Not Available")
+ipv4_addr=$(curl -s --max-time 3 https://ipv4.icanhazip.com 2>/dev/null || echo "未知")
+ipv6_addr=$(curl -s --max-time 3 https://ipv6.icanhazip.com 2>/dev/null || echo "不可用")
 
 # Get location based on IP
 location=$(get_geo_location "$ipv4_addr")
@@ -214,47 +271,46 @@ location=$(get_geo_location "$ipv4_addr")
 # Get system time
 sys_time=$(date "+%Y-%m-%d %H:%M %p")
 
-# Get uptime with error handling
+# Get uptime with error handling and convert to Chinese
 if command -v uptime &>/dev/null; then
     uptime_info=$(uptime -p 2>/dev/null | sed 's/up //' || uptime | sed 's/.*up \([^,]*\),.*/\1/')
+    uptime_info=$(convert_uptime_to_chinese "$uptime_info")
 else
-    uptime_info="Unknown"
+    uptime_info="未知"
 fi
 
-# Print header
+# Print header with decoration
 echo -e "\n"
-print_centered "${BOLD}${PURPLE}系统信息详情${NC}"
+print_centered "✦ 系统信息详情 ✦"
 echo -e "\n$DIVIDER"
 
-# Column layout - first column
-echo -e "主机名: ${PURPLE}$hostname${NC}"
-echo -e "运营商: ${PURPLE}$provider${NC}"
+# Column layout with improved formatting
+echo -e "► 主机名: ${PURPLE}$hostname${NC}"
+echo -e "► 运营商: ${PURPLE}$provider${NC}"
 echo -e "$DIVIDER"
-echo -e "系统版本: ${PURPLE}$os_version${NC}"
-echo -e "Linux版本: ${PURPLE}$kernel_version${NC}"
+echo -e "► 系统版本: ${PURPLE}$os_version${NC}"
+echo -e "► Linux版本: ${PURPLE}$kernel_version${NC}"
 echo -e "$DIVIDER"
-echo -e "CPU架构: ${PURPLE}$cpu_arch${NC}"
-echo -e "CPU型号: ${PURPLE}$cpu_model${NC}"
-echo -e "CPU核心数: ${PURPLE}$cpu_cores${NC}"
+echo -e "► CPU架构: ${PURPLE}$cpu_arch${NC}"
+echo -e "► CPU型号: ${PURPLE}$cpu_model${NC}"
+echo -e "► CPU核心数: ${PURPLE}$cpu_cores${NC}"
 echo -e "$DIVIDER"
-echo -e "CPU占用: ${PURPLE}$cpu_usage${NC}"
-echo -e "物理内存: ${PURPLE}${used_mem}/${total_mem} MB (${mem_percent})${NC}"
-echo -e "虚拟内存: ${PURPLE}${used_swap}/${total_swap}MB (${swap_percent})${NC}"
-echo -e "硬盘占用: ${PURPLE}${disk_used}/${disk_total} (${disk_percent})${NC}"
+echo -e "► CPU占用: ${PURPLE}$cpu_usage${NC}"
+echo -e "► 物理内存: ${PURPLE}${used_mem}/${total_mem} MB (${mem_percent})${NC}"
+echo -e "► 虚拟内存: ${PURPLE}${used_swap}/${total_swap}MB (${swap_percent})${NC}"
+echo -e "► 硬盘占用: ${PURPLE}${disk_used}/${disk_total} (${disk_percent})${NC}"
 echo -e "$DIVIDER"
-echo -e "总接收: ${PURPLE}${rx_gb} GB${NC}"
-echo -e "总发送: ${PURPLE}${tx_gb} GB${NC}"
+echo -e "► 总接收: ${PURPLE}${rx_gb} GB${NC}"
+echo -e "► 总发送: ${PURPLE}${tx_gb} GB${NC}"
 echo -e "$DIVIDER"
-echo -e "网络拥塞算法: ${PURPLE}$tcp_cong${NC}"
+echo -e "► 网络拥塞算法: ${PURPLE}$tcp_cong${NC}"
 echo -e "$DIVIDER"
-echo -e "公网IPv4地址: ${PURPLE}$ipv4_addr${NC}"
-echo -e "公网IPv6地址: ${PURPLE}$ipv6_addr${NC}"
+echo -e "► 公网IPv4地址: ${PURPLE}$ipv4_addr${NC}"
+echo -e "► 公网IPv6地址: ${PURPLE}$ipv6_addr${NC}"
 echo -e "$DIVIDER"
-echo -e "地理位置: ${PURPLE}$location${NC}"
-echo -e "系统时间: ${PURPLE}$sys_time${NC}"
+echo -e "► 地理位置: ${PURPLE}$location${NC}"
+echo -e "► 系统时间: ${PURPLE}$sys_time${NC}"
 echo -e "$DIVIDER"
-echo -e "系统运行时长: ${PURPLE}$uptime_info${NC}"
+echo -e "► 运行时长: ${PURPLE}$uptime_info${NC}"
 echo -e "$DIVIDER"
-echo -e "${GREEN}执行完成${NC}"
-echo -e "${YELLOW}按任意键返回...${NC}"
-read -n 1
+echo -e "${GREEN}✓ 系统检测完成${NC}"
