@@ -49,10 +49,6 @@ wget -qO- https://raw.githubusercontent.com/LeoJyenn/vps-info/main/system_info.s
 - Alpine Linux
 - Arch Linux
 
-## 截图
-
-[此处可以添加脚本运行截图]
-
 ## 许可证
 
 MIT License 
